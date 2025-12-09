@@ -1,1 +1,125 @@
+// api/ingredients.js
 
+// ⚠️ IMPORTANT: In a real-world application, this array will reset.
+let ingredients = [
+  { id: 1, name: "Milk", amount: "1 Gallon", expiryDate: "2025-12-15", addedOn: "2025-12-09" },
+  { id: 2, name: "Eggs", amount: "1 Dozen", expiryDate: "2025-12-28", addedOn: "2025-12-09" },
+];
+
+let nextId = 3; 
+
+// Helper function to reliably parse JSON body (for POST requests)
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(body));
+      } catch (e) {
+        resolve({}); 
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+
+// Utility function to handle requests
+export default async function handler(req, res) {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS'); // 增加 DELETE
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).json({});
+  }
+
+  // --- GET /api/ingredients ---
+  if (req.method === 'GET') {
+    return res.status(200).json({
+      success: true,
+      data: ingredients,
+    });
+  }
+
+  // --- POST /api/ingredients ---
+  if (req.method === 'POST') {
+    const body = await parseBody(req);
+    const { name, amount, expiryDate } = body;
+
+    if (!name || !amount || !expiryDate) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields: 'name', 'amount', and 'expiryDate' are mandatory.",
+      });
+    }
+
+    const dateCheck = new Date(expiryDate);
+    if (isNaN(dateCheck.getTime())) {
+        return res.status(400).json({
+            success: false,
+            error: "Invalid format for 'expiryDate'. Please use a valid date string (e.g., YYYY-MM-DD).",
+        });
+    }
+
+    const newIngredient = {
+      id: nextId++,
+      name: name,
+      amount: amount,
+      expiryDate: expiryDate,
+      addedOn: new Date().toISOString().split('T')[0] 
+    };
+
+    ingredients.push(newIngredient);
+
+    return res.status(201).json({
+      success: true,
+      message: "Ingredient added successfully.",
+      data: newIngredient,
+    });
+  }
+
+  // --- DELETE /api/ingredients?id=X ---
+  if (req.method === 'DELETE') {
+      // 从查询参数中获取要删除的 ID
+      const { id } = req.query; 
+
+      if (!id) {
+          return res.status(400).json({
+              success: false,
+              error: "Missing ingredient ID. Use /api/ingredients?id=X",
+          });
+      }
+
+      const idToDelete = parseInt(id);
+      const initialLength = ingredients.length;
+
+      // 使用 filter 创建一个新的数组，排除要删除的 ID
+      ingredients = ingredients.filter(item => item.id !== idToDelete);
+
+      if (ingredients.length < initialLength) {
+          // 长度减少了，说明成功删除
+          return res.status(200).json({
+              success: true,
+              message: `Ingredient with ID ${id} deleted successfully.`,
+          });
+      } else {
+          // 长度未减少，说明未找到该 ID
+          return res.status(404).json({
+              success: false,
+              error: `Ingredient with ID ${id} not found.`,
+          });
+      }
+  }
+
+  // --- Handle Unsupported Methods ---
+  return res.status(405).json({
+    success: false,
+    error: `Method ${req.method} Not Allowed`,
+  });
+}
