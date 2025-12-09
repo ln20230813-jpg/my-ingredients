@@ -1,1 +1,24 @@
-
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/ingredients.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "index.html",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/",
+      "dest": "index.html"
+    },
+    {
+      "src": "/api/ingredients",
+      "dest": "api/ingredients.js",
+      "methods": ["GET", "POST", "OPTIONS"]
+    }
+  ]
+}
