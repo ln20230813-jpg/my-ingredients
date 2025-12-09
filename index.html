@@ -1,1 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ingredient Expiry Tracker Client</title>
+    <style>
+        /* Basic Styling for the App */
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 900px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            background-color: #f7f7f7;
+        }
+        h1 { color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }
+        .container { 
+            display: flex; 
+            gap: 30px; 
+            margin-top: 20px;
+        }
+        #addForm, #results { 
+            background: white;
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); 
+            min-height: 300px;
+        }
+        #addForm { flex: 1; }
+        #results { flex: 2; }
+        
+        label { display: block; margin-top: 10px; font-weight: bold; color: #555; }
+        input[type="text"], input[type="date"] { 
+            padding: 10px; 
+            margin: 5px 0 15px 0; 
+            width: 100%; 
+            box-sizing: border-box; 
+            border: 1px solid #ddd; 
+            border-radius: 4px;
+        }
+        /* 统一按钮样式 */
+        button { 
+            padding: 10px 15px;
+            background-color: #4CAF50; 
+            color: white; 
+            border: none; 
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        button:hover { 
+            background-color: #45a049; 
+        }
 
+        h3 { margin-top: 0; color: #4CAF50; }
+        .ingredient-item { 
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #eee; 
+            padding: 10px 0;
+        }
+        .ingredient-item:last-child { border-bottom: none; }
+        
+        .expiry-date { 
+            font-weight: bold; 
+            text-align: right;
+        }
+        .expired { color: red; }
+        .warning { color: orange; }
+        .fresh { color: green; }
+
+        /* 删除按钮的特殊样式 */
+        .delete-btn {
+            background-color: #f44336;
+            padding: 5px 10px;
+            font-size: 12px;
+            margin-left: 15px;
+            width: auto;
+        }
+        .delete-btn:hover {
+            background-color: #d32f2f;
+        }
+    </style>
+</head>
+<body>
+    <h1>🍲 Ingredient Expiry Tracker</h1>
+
+    <p>使用表单添加食材，并点击“刷新列表”来加载和管理食材。</p>
+    
+    <div class="container">
+        
+        <div id="addForm">
+            <h3>添加新食材 (POST)</h3>
+            <label for="name">名称:</label>
+            <input type="text" id="name" placeholder="例如: Flour" required>
+
+            <label for="amount">数量/单位:</label>
+            <input type="text" id="amount" placeholder="例如: 500g, 1 Dozen" required>
+
+            <label for="expiryDate">到期日:</label>
+            <input type="date" id="expiryDate" required>
+
+            <button onclick="postIngredient()">➕ 添加食材</button>
+            <p id="postStatus" style="margin-top: 15px;"></p>
+        </div>
+
+        <div id="results">
+            <h3>当前食材列表 (GET/DELETE)</h3>
+            <button onclick="getIngredients()">🔄 刷新列表</button>
+            <div id="ingredientList" style="margin-top: 15px;">
+                <p>点击“刷新列表”加载食材。</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const API_URL = '/api/ingredients'; 
+        const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+        // --- 核心工具函数：计算到期天数 ---
+        function getDaysUntilExpiry(dateString) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); 
+            const expiry = new Date(dateString);
+            expiry.setHours(0, 0, 0, 0);
+
+            // 计算天数差
+            const diffTime = expiry.getTime() - today.getTime();
+            return Math.ceil(diffTime / MS_PER_DAY);
+        }
+
+        // --- 渲染食材列表 ---
+        function renderIngredients(ingredients) {
+            const listDiv = document.getElementById('ingredientList');
+            if (ingredients.length === 0) {
+                listDiv.innerHTML = '<p>当前没有食材记录。</p>';
+                return;
+            }
+
+            // 按照到期日升序排列
+            ingredients.sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
+
+            listDiv.innerHTML = ingredients.map(item => {
+                const daysLeft = getDaysUntilExpiry(item.expiryDate);
+                
+                let statusClass = 'fresh';
+                let statusText = `${daysLeft} 天后到期`;
+
+                if (daysLeft < 0) {
+                    statusClass = 'expired';
+                    statusText = `已过期 ${Math.abs(daysLeft)} 天`;
+                } else if (daysLeft <= 7) {
+                    statusClass = 'warning';
+                    statusText = `即将到期: ${daysLeft} 天`;
+                }
+                
+                return `
+                    <div class="ingredient-item">
+                        <div>
+                            <strong>${item.name}</strong> (${item.amount})<br>
+                            <small>添加于: ${item.addedOn}</small>
+                        </div>
+                        <div class="expiry-date ${statusClass}">
+                            ${statusText} (${item.expiryDate})
+                            <button class="delete-btn" onclick="deleteIngredient(${item.id})">🗑️ 删除</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // --- GET Ingredients ---
+        async function getIngredients() {
+            const listDiv = document.getElementById('ingredientList');
+            listDiv.innerHTML = '加载中...';
+            
+            try {
+                const response = await fetch(API_URL);
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    renderIngredients(data.data);
+                } else {
+                    listDiv.innerHTML = `<p style="color: red;">获取数据错误: ${data.error || '服务器错误。'}</p>`;
+                }
+            } catch (error) {
+                listDiv.innerHTML = `<p style="color: red;">连接 API 失败。</p>`;
+                console.error('Fetch error:', error);
+            }
+        }
+
+        // --- POST Ingredient (保持不变) ---
+        async function postIngredient() {
+            const name = document.getElementById('name').value;
+            const amount = document.getElementById('amount').value;
+            const expiryDate = document.getElementById('expiryDate').value;
+            const statusP = document.getElementById('postStatus');
+
+            if (!name || !amount || !expiryDate) {
+                statusP.style.color = 'orange';
+                statusP.textContent = '请填写所有字段。';
+                return;
+            }
+            
+            statusP.style.color = 'black';
+            statusP.textContent = '提交中...';
+
+            const payload = { name, amount, expiryDate };
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (response.status === 201 && data.success) {
+                    statusP.style.color = 'green';
+                    statusP.textContent = `✅ 成功! 已添加: ${data.data.name}`;
+                    document.getElementById('name').value = '';
+                    document.getElementById('amount').value = '';
+                    document.getElementById('expiryDate').value = '';
+                    getIngredients(); 
+                } else if (response.status === 400 && !data.success) {
+                    statusP.style.color = 'red';
+                    statusP.textContent = `❌ 错误: ${data.error}`;
+                } else {
+                    statusP.style.color = 'red';
+                    statusP.textContent = `发生未知错误。状态: ${response.status}`;
+                }
+            } catch (error) {
+                statusP.style.color = 'red';
+                statusP.textContent = `Post 失败。`;
+                console.error('Post error:', error);
+            }
+        }
+
+        // --- DELETE Ingredient (新函数) ---
+        async function deleteIngredient(id) {
+            if (!confirm(`确定要删除 ID 为 ${id} 的食材吗？`)) {
+                return;
+            }
+
+            try {
+                // DELETE 请求通过查询参数传递 ID
+                const response = await fetch(`${API_URL}?id=${id}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    alert(data.message);
+                    getIngredients(); // 成功后刷新列表
+                } else {
+                    alert(`删除失败: ${data.error}`);
+                }
+            } catch (error) {
+                alert('删除操作失败，请检查网络或控制台。');
+                console.error('Delete error:', error);
+            }
+        }
+
+
+        // Load ingredients on page load
+        document.addEventListener('DOMContentLoaded', getIngredients);
+    </script>
+</body>
+</html>
